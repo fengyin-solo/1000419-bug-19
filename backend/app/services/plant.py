@@ -17,6 +17,8 @@ class PlantService:
         self,
         *,
         keyword: str | None = None,
+        name: str | None = None,
+        process: str | None = None,
         status: str | None = None,
         page: int = 1,
         size: int = 20,
@@ -24,6 +26,10 @@ class PlantService:
         rows = store.rows(MODULE)
         if keyword:
             rows = [row for row in rows if keyword in str(row.get("单元编码", ""))]
+        if name:
+            rows = [row for row in rows if name in str(row.get("单元名称", ""))]
+        if process:
+            rows = [row for row in rows if process in str(row.get("处理工艺", ""))]
         if status:
             rows = [row for row in rows if row.get("status") == status]
         total = len(rows)

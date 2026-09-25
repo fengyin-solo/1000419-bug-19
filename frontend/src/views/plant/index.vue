@@ -18,7 +18,7 @@
       </article>
     </div>
 
-    <form class="filter-bar" @submit.prevent="reload">
+    <form class="filter-bar" @submit.prevent="applyFilters">
       <label v-for="field in filterFields" :key="field" class="filter-item">
         <span>{{ field }}</span>
         <input v-model="filters[field]" :placeholder="`按${field}检索`" />
@@ -64,6 +64,7 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 import { request } from '@/api/client'
 
@@ -75,19 +76,59 @@ const actions = ["完成调试", "安排减量", "停用单元"]
 const statuses = ["待调试", "正常运行", "减量运行", "已停用"]
 const stats = [{"label": "运行单元", "value": 0}, {"label": "减量运行单元", "value": 0}, {"label": "设计处理总量", "value": 0}]
 
+// 筛选框字段与接口查询参数的对应关系：列表、重置、导出都从这里取同一套条件
+const FILTER_PARAMS: Record<string, string> = {
+  单元编码: 'keyword',
+  单元名称: 'name',
+  处理工艺: 'process',
+}
+
+const route = useRoute()
+const router = useRouter()
+
 const rows = ref<Row[]>([])
 const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
 
+function buildQuery(): Record<string, string> {
+  const query: Record<string, string> = {}
+  for (const field of filterFields) {
+    const value = (filters.value[field] ?? '').trim()
+    if (value) {
+      query[FILTER_PARAMS[field]] = value
+    }
+  }
+  return query
+}
+
+function readFiltersFromQuery(): Record<string, string> {
+  const next: Record<string, string> = {}
+  for (const field of filterFields) {
+    const raw = route.query[FILTER_PARAMS[field]]
+    const value = Array.isArray(raw) ? raw[0] : raw
+    if (value) {
+      next[field] = value
+    }
+  }
+  return next
+}
+
+function applyFilters() {
+  void router.replace({ query: buildQuery() })
+  void reload()
+}
+
 function resetFilters() {
   filters.value = {}
+  void router.replace({ query: {} })
   void reload()
 }
 
 function exportRows() {
-  window.open(`${ENDPOINT}/export`, '_blank')
+  const query = new URLSearchParams(buildQuery()).toString()
+  window.open(`${ENDPOINT}/export${query ? `?${query}` : ''}`, '_blank')
 }
 
 function openCreate() {
@@ -112,9 +153,9 @@ async function runAction(action: string, row: Row) {
 
 async function reload() {
   errorMessage.value = ''
-  const query = new URLSearchParams(filters.value as Record<string, string>).toString()
+  const query = new URLSearchParams(buildQuery()).toString()
   try {
-    const response = await request(`${ENDPOINT}?${query}`)
+    const response = await request(`${ENDPOINT}${query ? `?${query}` : ''}`)
     if (!response.ok) {
       throw new Error('工艺单元列表读取失败')
     }
@@ -126,5 +167,8 @@ async function reload() {
   }
 }
 
-onMounted(reload)
+onMounted(() => {
+  filters.value = readFiltersFromQuery()
+  void reload()
+})
 </script>
