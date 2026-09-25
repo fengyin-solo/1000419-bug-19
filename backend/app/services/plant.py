@@ -11,21 +11,35 @@ STATUS_ORDER = ["待调试", "正常运行", "减量运行", "已停用"]
 ACTION_RULES = {"完成调试": "正常运行", "安排减量": "减量运行", "停用单元": "已停用"}
 NEGATIVE_ACTIONS = ["停用单元"]
 
+# 列表与导出共用的筛选字段，保证两边口径一致
+FILTER_FIELDS = ["单元编码", "单元名称", "处理工艺"]
+
 
 class PlantService:
     def list_entries(
         self,
         *,
+        filters: dict[str, str] | None = None,
         keyword: str | None = None,
         status: str | None = None,
         page: int = 1,
         size: int = 20,
     ) -> tuple[list[dict[str, Any]], int]:
         rows = store.rows(MODULE)
+        active_filters = {field: value.strip() for field, value in (filters or {}).items() if value and value.strip()}
+        for field, value in active_filters.items():
+            if field not in FILTER_FIELDS:
+                continue
+            rows = [row for row in rows if value in str(row.get(field, ""))]
+        # 兼容旧参数：keyword 仍按单元编码模糊检索
         if keyword:
-            rows = [row for row in rows if keyword in str(row.get("单元编码", ""))]
+            value = keyword.strip()
+            if value:
+                rows = [row for row in rows if value in str(row.get("单元编码", ""))]
         if status:
-            rows = [row for row in rows if row.get("status") == status]
+            value = status.strip()
+            if value:
+                rows = [row for row in rows if row.get("status") == value]
         total = len(rows)
         start = max(page - 1, 0) * size
         return rows[start:start + size], total

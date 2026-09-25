@@ -16,18 +16,51 @@ LIST_FIELDS = ["单元编码", "单元名称", "处理工艺", "设计处理量"
 STATUSES = ["待调试", "正常运行", "减量运行", "已停用"]
 
 
+def _collect_filters(
+    code: str | None,
+    name: str | None,
+    process: str | None,
+) -> dict[str, str]:
+    """把列表与导出共用的筛选条件收成同一份口径。"""
+    raw = {"单元编码": code, "单元名称": name, "处理工艺": process}
+    return {field: value.strip() for field, value in raw.items() if value and value.strip()}
+
+
 @router.get("", response_model=PageResult[dict])
 def list_entries(
-    keyword: str | None = Query(default=None, description="按单元编码检索"),
+    code: str | None = Query(default=None, description="按单元编码检索"),
+    name: str | None = Query(default=None, description="按单元名称检索"),
+    process: str | None = Query(default=None, description="按处理工艺检索"),
+    keyword: str | None = Query(default=None, description="兼容旧参数，按单元编码检索"),
     status: str | None = Query(default=None, description="待调试、正常运行、减量运行、已停用"),
     page: int = 1,
     size: int = 20,
 ) -> PageResult[dict]:
-    """按单元编码与状态过滤厂区单元列表；没有数据时返回空页，不报错。"""
+    """按单元编码、单元名称、处理工艺过滤厂区单元列表；没有数据时返回空页，不报错。"""
     if size > 200:
         raise HTTPException(status_code=400, detail="每页最多 200 条，请缩小分页范围")
-    items, total = service.list_entries(keyword=keyword, status=status, page=page, size=size)
+    filters = _collect_filters(code, name, process)
+    items, total = service.list_entries(
+        filters=filters, keyword=keyword, status=status, page=page, size=size
+    )
     return PageResult(items=items, total=total, page=page, size=size)
+
+
+# 注意：/export 必须写在 /{entry_id} 之前，否则会被当成 entry_id 解析而报错
+@router.get("/export")
+def export_entries(
+    code: str | None = Query(default=None, description="按单元编码检索"),
+    name: str | None = Query(default=None, description="按单元名称检索"),
+    process: str | None = Query(default=None, description="按处理工艺检索"),
+    keyword: str | None = Query(default=None, description="兼容旧参数，按单元编码检索"),
+    status: str | None = Query(default=None, description="待调试、正常运行、减量运行、已停用"),
+) -> dict[str, Any]:
+    """导出厂区单元清单：与列表页同一套过滤条件，返回条件下的全量数据。"""
+    filters = _collect_filters(code, name, process)
+    items, total = service.list_entries(
+        filters=filters, keyword=keyword, status=status, page=1, size=10000
+    )
+    return {"module": "plant", "total": total, "items": items}
 
 
 @router.get("/{entry_id}", response_model=dict)
@@ -56,10 +89,3 @@ def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
     if entry is None:
         return ActionResult(ok=False, message=message)
     return ActionResult(ok=True, message=message, entry=entry)
-
-
-@router.get("/export")
-def export_entries() -> dict[str, Any]:
-    """导出厂区单元清单：返回当前过滤条件下的全量数据。"""
-    items, total = service.list_entries(page=1, size=10000)
-    return {"module": "plant", "total": total, "items": items}

@@ -18,7 +18,7 @@
       </article>
     </div>
 
-    <form class="filter-bar" @submit.prevent="reload">
+    <form class="filter-bar" @submit.prevent="applyFilters">
       <label v-for="field in filterFields" :key="field" class="filter-item">
         <span>{{ field }}</span>
         <input v-model="filters[field]" :placeholder="`按${field}检索`" />
@@ -63,7 +63,8 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 import { request } from '@/api/client'
 
@@ -75,19 +76,58 @@ const actions = ["完成调试", "安排减量", "停用单元"]
 const statuses = ["待调试", "正常运行", "减量运行", "已停用"]
 const stats = [{"label": "运行单元", "value": 0}, {"label": "减量运行单元", "value": 0}, {"label": "设计处理总量", "value": 0}]
 
+// 前端筛选项与后端查询参数的对应关系，列表、重置、导出都走这一份
+const filterParams: Record<string, string> = {
+  单元编码: 'code',
+  单元名称: 'name',
+  处理工艺: 'process',
+}
+const filterFields = Object.keys(filterParams)
+
+const route = useRoute()
+const router = useRouter()
+
 const rows = ref<Row[]>([])
 const total = ref(0)
 const errorMessage = ref('')
-const filters = ref<Record<string, string>>({})
-const filterFields = columns.slice(0, 3)
+const filters = ref<Record<string, string>>(Object.fromEntries(filterFields.map((field) => [field, ''])))
+
+function syncFiltersFromRoute() {
+  for (const field of filterFields) {
+    const value = route.query[filterParams[field]]
+    filters.value[field] = typeof value === 'string' ? value : ''
+  }
+}
+
+// 列表与导出共用同一套条件，保证列表页定位到的结果与导出完全一致
+function activeParams() {
+  const params: Record<string, string> = {}
+  for (const field of filterFields) {
+    const value = filters.value[field]?.trim() ?? ''
+    if (value) {
+      params[filterParams[field]] = value
+    }
+  }
+  return params
+}
+
+function buildQuery() {
+  return new URLSearchParams(activeParams()).toString()
+}
+
+function applyFilters() {
+  void router.replace({ query: activeParams() })
+}
 
 function resetFilters() {
-  filters.value = {}
-  void reload()
+  for (const field of filterFields) {
+    filters.value[field] = ''
+  }
+  void router.replace({ query: {} })
 }
 
 function exportRows() {
-  window.open(`${ENDPOINT}/export`, '_blank')
+  window.open(`${ENDPOINT}/export?${buildQuery()}`, '_blank')
 }
 
 function openCreate() {
@@ -112,7 +152,8 @@ async function runAction(action: string, row: Row) {
 
 async function reload() {
   errorMessage.value = ''
-  const query = new URLSearchParams(filters.value as Record<string, string>).toString()
+  syncFiltersFromRoute()
+  const query = buildQuery()
   try {
     const response = await request(`${ENDPOINT}?${query}`)
     if (!response.ok) {
@@ -125,6 +166,11 @@ async function reload() {
     errorMessage.value = error instanceof Error ? error.message : '厂区单元列表读取失败'
   }
 }
+
+// 地址栏查询参数变化（查询、重置、前进/后退、刷新进入）都按同一入口重新拉取
+watch(() => route.query, () => {
+  void reload()
+}, { deep: true })
 
 onMounted(reload)
 </script>
